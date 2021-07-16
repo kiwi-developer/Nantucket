@@ -13,7 +13,7 @@ import "./compound/PriceOracle.sol";
 import './uniswap/UniswapV2Library.sol';
 import "./uniswap/IUniswapV2Factory.sol";
 import "./uniswap/IUniswapV2Router02.sol";
-import "./uniswap/IUniswapV2Callee.sol";
+import "./uniswap/IHswapV2Callee.sol";
 import "./uniswap/IUniswapV2Pair.sol";
 import "./uniswap/IWETH.sol";
 
@@ -26,7 +26,7 @@ interface Chi {
 }
 
 
-contract Liquidator is IUniswapV2Callee {
+contract Liquidator is IHswapV2Callee {
 
     struct RecipientChange {
         address payable recipient;
@@ -39,9 +39,9 @@ contract Liquidator is IUniswapV2Callee {
     address private constant CHI = 0x0000000000004946c0e9F43F4Dee607b0eF1fA1c;
     address constant private ETHER = address(0);
     address constant private CETH = 0x4Ddc2D193948926D02f9B1fE9e1daa0718270ED5;
-    address constant private WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address constant private ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
-    address constant private FACTORY = 0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f;
+    address constant private WETH = 0xd35e20a13c45d7e2e0d1B2D29502A883895235E1;
+    address constant private ROUTER = 0xF10391fE0c5845166E8768BFEc172B112014bDbA;
+    address constant private FACTORY = 0xe544026845D1Ee29CF74Fe706CC9661BE7Fd9510;
     uint constant private RECIP_CHANGE_WAIT_PERIOD = 24 hours;
     // Coefficient = (1 - 1/sqrt(1.02)) for 2% slippage. Multiply by 100000 to get integer
     uint constant private SLIPPAGE_THRESHOLD_FACT = 985;
@@ -83,7 +83,7 @@ contract Liquidator is IUniswapV2Callee {
     constructor() public {
         recipient = msg.sender;
 
-        comptroller = Comptroller(0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B);
+        comptroller = Comptroller(0x0486E289dB62F441fAAAc8e3267e1246476E63aB);
         priceOracle = PriceOracle(comptroller.oracle());
         closeFact = comptroller.closeFactorMantissa();
         liqIncent = comptroller.liquidationIncentiveMantissa();
@@ -123,17 +123,6 @@ contract Liquidator is IUniswapV2Callee {
         gasThreshold = _gasThreshold;
     }
 
-    function liquidateSNWithPrice(
-        bytes[] calldata _messages,
-        bytes[] calldata _signatures,
-        string[] calldata _symbols,
-        address[] calldata _borrowers,
-        address[] calldata _cTokens
-    ) external {
-        priceOracle.postPrices(_messages, _signatures, _symbols);
-        liquidateSN(_borrowers, _cTokens);
-    }
-
     function liquidateSN(address[] calldata _borrowers, address[] calldata _cTokens) public {
         uint i;
 
@@ -142,18 +131,6 @@ contract Liquidator is IUniswapV2Callee {
             if (gasleft() < gasThreshold || i + 1 == _borrowers.length) break;
             i++;
         }
-    }
-
-    function liquidateSWithPrice(
-        bytes[] calldata _messages,
-        bytes[] calldata _signatures,
-        string[] calldata _symbols,
-        address _borrower,
-        address _repayCToken,
-        address _seizeCToken
-    ) external {
-        priceOracle.postPrices(_messages, _signatures, _symbols);
-        liquidateS(_borrower, _repayCToken, _seizeCToken);
     }
 
     /**
@@ -225,7 +202,7 @@ contract Liquidator is IUniswapV2Callee {
      * @param amount1 (uint): the amount of token1 being borrowed
      * @param data (bytes): data passed through from the caller
      */
-    function uniswapV2Call(address sender, uint amount0, uint amount1, bytes calldata data) override external {
+    function hswapV2Call(address sender, uint amount0, uint amount1, bytes calldata data) override external {
         // Unpack parameters sent from the `liquidate` function
         // NOTE: these are being passed in from some other contract, and cannot necessarily be trusted
         (address borrower, address repayCToken, address seizeCToken) = abi.decode(data, (address, address, address));
@@ -345,52 +322,5 @@ contract Liquidator is IUniswapV2Callee {
             IERC20(_assetAddress).safeTransfer(recipient, assetBalance);
         }
         emit RevenueWithdrawn(recipient, _assetAddress, assetBalance);
-    }
-
-    // MARK - Chi functions ------------------------------------------------------------------------
-
-    function liquidateSChi(address _borrower, address _repayCToken, address _seizeCToken) external discountCHI {
-        liquidateS(_borrower, _repayCToken, _seizeCToken);
-    }
-
-    function liquidateSNChi(address[] calldata _borrowers, address[] calldata _cTokens) external discountCHI {
-        liquidateSN(_borrowers, _cTokens);
-    }
-
-    function liquidateSWithPriceChi(
-        bytes[] calldata _messages,
-        bytes[] calldata _signatures,
-        string[] calldata _symbols,
-        address _borrower,
-        address _repayCToken,
-        address _seizeCToken
-    ) external {
-        uint gasStart1 = gasleft();
-        priceOracle.postPrices(_messages, _signatures, _symbols);
-
-        uint gasStart2 = gasleft();
-        Chi(CHI).freeFromUpTo(msg.sender, (gasStart1 - gasleft()) / 41947);
-        liquidateS(_borrower, _repayCToken, _seizeCToken);
-        
-        uint gasSpent = 21000 + gasStart2 - gasleft() + 16 * msg.data.length;
-        Chi(CHI).freeFromUpTo(msg.sender, (gasSpent + 14154) / 41947);
-    }
-
-    function liquidateSNWithPriceChi(
-        bytes[] calldata _messages,
-        bytes[] calldata _signatures,
-        string[] calldata _symbols,
-        address[] calldata _borrowers,
-        address[] calldata _cTokens
-    ) external {
-        uint gasStart1 = gasleft();
-        priceOracle.postPrices(_messages, _signatures, _symbols);
-
-        uint gasStart2 = gasleft();
-        Chi(CHI).freeFromUpTo(msg.sender, (gasStart1 - gasleft()) / 41947);
-        liquidateSN(_borrowers, _cTokens);
-        
-        uint gasSpent = 21000 + gasStart2 - gasleft() + 16 * msg.data.length;
-        Chi(CHI).freeFromUpTo(msg.sender, (gasSpent + 14154) / 41947);
     }
 }

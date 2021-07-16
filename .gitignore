@@ -110,3 +110,5 @@ dist
 # OpenZeppelin
 .openzeppelin/dev-*.json
 .openzeppelin/.session
+
+.idea
